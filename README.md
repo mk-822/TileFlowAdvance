@@ -2,6 +2,8 @@
 
 5レーン×20段のベルトを流れるタイルを受け止め、5×5のプールで同じ色を縦・横・斜めに3枚以上そろえる、Game Boy Advance向けのパズルゲームです。ブラウザ版 Tile Flow のルールをC++とButanoで移植しました。 [移植元](https://github.com/mk-822/tile-flow/tree/a6da752)
 
+配布用の `TileFlowAdvance.gba` は [GitHub Releases](https://github.com/mk-822/TileFlowAdvance/releases) からダウンロードできます。
+
 ![Tile Flow Advanceのプレイ画面](docs/gameplay.png)
 
 - 3つの難易度と、WAVE 1・6・11からのスタートに対応します。
@@ -42,6 +44,12 @@ Butano がすでにある場合は `make LIBBUTANO=/path/to/butano/butano` で `
 ### グラフィックの再生成
 
 ビルドには `graphics/` の画像を使います。描画を変更する場合は、Pillow をインストールして `python tools/generate_graphics.py` を実行してください。
+
+ベルト上のタイルの回転コマは、[ブラウザ版の3Dモデル](https://github.com/mk-822/tile-flow/tree/1e3bf4d448ce56d840bd7d57c8de38f404ea258e)から生成しています。再生成する場合は、ブラウザ版の依存関係を `npm ci` でインストールし、Chrome または Chromium の実行ファイルを指定してください。
+
+~~~sh
+python tools/capture_belt_roll.py /path/to/tile-flow /path/to/chrome
+~~~
 
 ## ライセンスとクレジット
 

@@ -267,7 +267,7 @@ public:
         const Screen current = screen();
         _view.update(_game, {current, _title_row, _difficulty, current == Screen::clear ? _skip_choice : _start_choice,
                             int(best), _save.volume, bool(_save.muted), fast,
-                            _result_frames > 0 || _result_exit_frames > 0, _result_exit_frames});
+                            _result_frames > 0 || _result_exit_frames > 0, _result_exit_frames, result_exit_duration()});
         _audio.update();
     }
 
@@ -298,7 +298,8 @@ private:
         app._audio.event(app._game, event);
         if(event.type == EventType::clear || event.type == EventType::over)
         {
-            app._result_frames = event.type == EventType::clear ? ScreenEffects::clear_ripple_frames : 45;
+            app._result_frames = event.type == EventType::clear ?
+                    ScreenEffects::clear_ripple_frames : result_fade_in_frames(Screen::over);
             app._skip_choice = 0;
         }
     }
@@ -338,10 +339,15 @@ private:
         clear_movement();
     }
 
+    [[nodiscard]] int result_exit_duration() const
+    {
+        return _return_to_title ? 36 : 12;
+    }
+
     void exit_result(bool return_to_title)
     {
         _return_to_title = return_to_title;
-        _result_exit_frames = result_fade_out_frames;
+        _result_exit_frames = result_exit_duration();
     }
 
     void clear_movement()

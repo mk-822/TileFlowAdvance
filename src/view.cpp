@@ -10,6 +10,7 @@
 #include "bn_regular_bg_items_result_board.h"
 #include "bn_regular_bg_items_title_screen.h"
 #include "bn_regular_bg_items_wave_banner.h"
+#include "bn_sprite_items_belt_roll.h"
 #include "bn_sprite_items_drop_meter.h"
 #include "bn_sprite_items_glyphs.h"
 #include "bn_sprite_items_goal_fill.h"
@@ -17,6 +18,7 @@
 #include "bn_sprite_items_ripple.h"
 #include "bn_sprite_items_spark.h"
 #include "bn_sprite_items_tiles.h"
+#include "bn_sprite_tiles_ptr.h"
 
 namespace tf
 {
@@ -64,7 +66,13 @@ constexpr int board_sprite_priority = 2;
 constexpr int overlay_priority = 0;
 constexpr int banner_travel = 204;
 constexpr int banner_slide_frames = 18;
-constexpr int result_fade_in_frames = 20;
+constexpr int belt_poses = 40;
+constexpr int belt_graphics = bn::sprite_items::belt_roll.tiles_item().graphics_count();
+constexpr int belt_sizes = belt_graphics / belt_poses;
+constexpr int belt_depth_layers = 4;
+constexpr int match_ripple_frame_ticks = 4;
+static_assert(belt_graphics % belt_poses == 0 && belt_cells % belt_sizes == 0);
+static_assert(bn::sprite_items::tiles.tiles_item().graphics_count() == colors + 1);
 
 int column_x(int lane)
 {
@@ -143,10 +151,6 @@ View::View() :
     position(_drops, {215, 117});
     _font.set_bg_priority(board_sprite_priority);
     _font.set_z_order(-10);
-    for(int index = 0; index < _tile_graphics.max_size(); ++index)
-    {
-        _tile_graphics.push_back(bn::sprite_items::tiles.tiles_item().create_tiles(index));
-    }
     for(const auto& palette : tile_colors)
     {
         _palettes.push_back(bn::sprite_palette_item(palette, bn::bpp_mode::BPP_4).create_palette());
@@ -160,13 +164,14 @@ void View::start_wave(const Game& game)
     {
         tile = {};
     }
-    for(Effect& item : _effects)
+    for(Spark& item : _sparks)
     {
         item.sprite.reset();
     }
+    _match_ripples.clear();
     _paddle_x = column_x(game.lane());
     _clock = 0;
-    _next_effect = 0;
+    _next_spark = 0;
     _message_time = 0;
     _intro_frame = 0;
 }
@@ -200,15 +205,18 @@ void View::event(const Game& game, const Event& event)
         break;
     case EventType::catch_tile:
         animate_tile(event.tile, Motion::catch_tile, 6, {x, 83});
-        effect({x, 86}, game.tiles()[event.tile].color, 1, -5, false);
+        spark({x, 86}, game.tiles()[event.tile].color, 1, -5);
         break;
     case EventType::miss:
+    {
         _screen_effects.miss();
         announce("TILE MISSED", 74);
-        effect({x, 86}, 5, -3, -3, false);
-        effect({x, 86}, 5, 3, -2, false);
-        effect({x, 86}, 5, 1, 0, false);
+        const int color = game.tiles()[event.tile].color;
+        spark({x, 86}, color, -3, -3);
+        spark({x, 86}, color, 3, -2);
+        spark({x, 86}, color, 1, 0);
         break;
+    }
     case EventType::blocked:
         announce("NO SPACE", 50);
         break;
@@ -230,14 +238,17 @@ void View::event(const Game& game, const Event& event)
         {
             announce(bn::format<32>("FLOW +{}", event.points), 86);
         }
-        int ripples = 0;
+        _match_ripples.clear();
+        _match_ripple_age = 0;
+        const auto& ripple_item = bn::sprite_items::ripple;
+        const auto ripple_tiles = ripple_item.tiles_item().create_tiles(0);
         int matched = 0;
         int center_x = 0;
         int center_y = 0;
         for(int lane = 0; lane < lanes; ++lane)
         {
             const Column& column = game.pool()[lane];
-            int below = 0;
+            bool matched_below = false;
             for(int row = 0; row < column.size; ++row)
             {
                 const int id = column.ids[row];
@@ -247,15 +258,19 @@ void View::event(const Game& game, const Event& event)
                     center_x += point.x().integer();
                     center_y += point.y().integer();
                     ++matched;
-                    if(!below && ripples < 3)
-                    {
-                        effect(point, game.tiles()[id].color, 0, 0, true);
-                        ++ripples;
-                    }
-                    effect(point, game.tiles()[id].color, (lane + row) % 2 ? 4 : -4, -5 - row, false);
-                    ++below;
+                    const int color = game.tiles()[id].color;
+                    // Free the disappearing tile's sprite slot for its ripple.
+                    _tiles[id] = {};
+                    auto& ripple = _match_ripples.emplace_back(
+                            bn::sprite_ptr::create(ripple_item.shape_size(), ripple_tiles, _palettes[color]));
+                    ripple.set_bg_priority(board_sprite_priority);
+                    ripple.set_camera(_screen_effects.camera());
+                    ripple.set_z_order(-8);
+                    position(ripple, point);
+                    spark(point, color, (lane + row) % 2 ? 4 : -4, -5 - row);
+                    matched_below = true;
                 }
-                else if(below)
+                else if(matched_below)
                 {
                     animate_tile(id, Motion::land, 17, point);
                 }
@@ -272,12 +287,12 @@ void View::event(const Game& game, const Event& event)
     }
 }
 
-void View::effect(bn::fixed_point origin, int palette, int vx, int vy, bool ripple)
+void View::spark(bn::fixed_point origin, int palette, int vx, int vy)
 {
-    Effect& item = _effects[_next_effect];
-    _next_effect = (_next_effect + 1) % int(_effects.size());
+    Spark& item = _sparks[_next_spark];
+    _next_spark = (_next_spark + 1) % int(_sparks.size());
     item.sprite.reset();
-    item.sprite = (ripple ? bn::sprite_items::ripple : bn::sprite_items::spark).create_sprite();
+    item.sprite = bn::sprite_items::spark.create_sprite();
     item.sprite->set_bg_priority(board_sprite_priority);
     item.sprite->set_camera(_screen_effects.camera());
     item.sprite->set_z_order(-8);
@@ -287,25 +302,38 @@ void View::effect(bn::fixed_point origin, int palette, int vx, int vy, bool ripp
     item.x_speed = vx;
     item.y_speed = vy;
     item.age = 0;
-    item.ripple = ripple;
 }
 
 void View::update_effects()
 {
-    for(Effect& item : _effects)
+    if(!_match_ripples.empty())
+    {
+        const int age = _match_ripple_age++;
+        const auto& tiles_item = bn::sprite_items::ripple.tiles_item();
+        const int frame = age / match_ripple_frame_ticks;
+        if(frame == tiles_item.graphics_count())
+        {
+            _match_ripples.clear();
+        }
+        else if(age && age % match_ripple_frame_ticks == 0)
+        {
+            const auto tiles = tiles_item.create_tiles(frame);
+            for(auto& ripple : _match_ripples)
+            {
+                ripple.set_tiles(tiles);
+            }
+        }
+    }
+    for(Spark& item : _sparks)
     {
         if(!item.sprite)
         {
             continue;
         }
         const int age = item.age++;
-        if(age == (item.ripple ? 24 : 20))
+        if(age == 20)
         {
             item.sprite.reset();
-        }
-        else if(item.ripple)
-        {
-            item.sprite->set_tiles(bn::sprite_items::ripple.tiles_item(), age / 4);
         }
         else
         {
@@ -357,10 +385,11 @@ void View::change_screen(Screen screen)
         {
             tile = {};
         }
-        for(Effect& item : _effects)
+        for(Spark& item : _sparks)
         {
             item.sprite.reset();
         }
+        _match_ripples.clear();
     }
 }
 
@@ -453,7 +482,8 @@ void View::update_result(bn::fixed fade, bool closing)
     ++_result_age;
 }
 
-void View::draw_tile(int id, bn::fixed_point point, int graphics, int palette, int depth, bool tick)
+void View::draw_tile(int id, bn::fixed_point point, const bn::sprite_item& item, int graphics,
+                     int palette, int depth, bool tick)
 {
     TileSprite& tile = _tiles[id];
     if(tile.remaining)
@@ -472,15 +502,21 @@ void View::draw_tile(int id, bn::fixed_point point, int graphics, int palette, i
     }
     if(!tile.sprite)
     {
-        tile.sprite = bn::sprite_ptr::create(bn::sprite_items::tiles.shape_size(), _tile_graphics[graphics],
+        tile.sprite = bn::sprite_ptr::create(item.shape_size(), item.tiles_item().create_tiles(graphics),
                                              _palettes[palette]);
         tile.sprite->set_bg_priority(board_sprite_priority);
         tile.sprite->set_camera(_screen_effects.camera());
     }
     else
     {
-        tile.sprite->set_tiles_and_palette(_tile_graphics[graphics], _palettes[palette]);
+        if(tile.graphics_item != &item || tile.graphics_index != graphics)
+        {
+            tile.sprite->set_tiles(item.tiles_item(), graphics);
+        }
+        tile.sprite->set_palette(_palettes[palette]);
     }
+    tile.graphics_item = &item;
+    tile.graphics_index = graphics;
     tile.sprite->set_z_order(depth);
     position(*tile.sprite, point);
 }
@@ -512,13 +548,16 @@ void View::update_board(const Game& game, bool tick, bool fast)
         const int distance = belt_length - tile.distance;
         const int size = std::min(belt_sizes - 1, distance / (cell_length * belt_cells / belt_sizes));
         const int pose = distance % cell_length * belt_poses / cell_length;
-        draw_tile(id, belt_point(tile), size * belt_poses + pose, tile.color, tile.flight ? -6 : belt_sizes - size, tick);
+        const int depth = belt_depth_layers - distance * belt_depth_layers / belt_length;
+        draw_tile(id, belt_point(tile), bn::sprite_items::belt_roll, size * belt_poses + pose,
+                  tile.color, tile.flight ? -6 : depth, tick);
     }
     const Column& stack = game.stack();
     for(int index = 0; index < stack.size; ++index)
     {
         const int id = stack.ids[index];
-        draw_tile(id, {_paddle_x, 86 - index * 4}, stack_graphics, game.tiles()[id].color, -1 - index, tick);
+        draw_tile(id, {_paddle_x, 86 - index * 4}, bn::sprite_items::tiles, colors,
+                  game.tiles()[id].color, -1 - index, tick);
     }
     for(int lane = 0; lane < lanes; ++lane)
     {
@@ -528,7 +567,7 @@ void View::update_board(const Game& game, bool tick, bool fast)
             const int id = column.ids[row];
             const int color = game.tiles()[id].color;
             const bool flash = (game.highlighted() & cell_bit(lane, row)) && (_clock / 4) % 2 == 0;
-            draw_tile(id, pool_point(lane, row), pool_graphics + color, flash ? colors : color, 0, tick);
+            draw_tile(id, pool_point(lane, row), bn::sprite_items::tiles, color, flash ? colors : color, 0, tick);
         }
     }
 }
@@ -714,12 +753,13 @@ void View::update(const Game& game, const Display& display)
     {
         if(closing)
         {
-            const bn::fixed t = bn::fixed(display.result_exit_frames) / result_fade_out_frames;
+            const bn::fixed t = bn::fixed(display.result_exit_frames) / display.result_exit_duration;
             fade = t * t;
         }
         else
         {
-            const bn::fixed t = bn::fixed(std::min(_result_age, result_fade_in_frames)) / result_fade_in_frames;
+            const int duration = result_fade_in_frames(display.screen);
+            const bn::fixed t = bn::fixed(std::min(_result_age, duration)) / duration;
             fade = t * (2 - t);
         }
     }

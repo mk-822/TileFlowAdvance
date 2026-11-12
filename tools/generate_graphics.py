@@ -1,7 +1,6 @@
 """Bake Tile Flow's 8-bit backgrounds and 4-bit sprite sheets for Butano."""
 
 import json
-import math
 import random
 from pathlib import Path
 
@@ -37,6 +36,9 @@ COLORS = [
     (48, 96, 120), (24, 24, 56), (40, 32, 80), (24, 40, 72),
 ]
 TRANSPARENT, INK, DEEP, PANEL, PANEL_LIT, GRID, STEEL, EDGE, RIM, MUTED, LIGHT, WHITE, CYAN, ICE = range(14)
+
+SPRITE_COLORS = [COLORS[index] for index in (0, 11, 12, 9, 5, 10, 15, 18, 16)]
+
 
 def palette(image, colors):
     entries = colors + [(0, 0, 0)] * (256 - len(colors))
@@ -202,67 +204,12 @@ def title_screen():
 
 def sprite_sheet(name, width, height, count):
     image = Image.new("P", (width, height * count))
-    palette(image, [COLORS[0], COLORS[11], COLORS[12], COLORS[9], COLORS[5],
-                    COLORS[10], COLORS[15], COLORS[18], COLORS[16]])
+    palette(image, SPRITE_COLORS)
     config = {"type": "sprite", "height": height}
     def save():
         image.save(OUT / (name + ".bmp"), bits=8)
         (OUT / (name + ".json")).write_text(json.dumps(config))
     return ImageDraw.Draw(image), save
-
-BELT_SIZES = 4
-BELT_POSES = 12
-
-
-def smoothstep(start, end, value):
-    t = max(0, min(1, (value - start) / (end - start)))
-    return t * t * (3 - 2 * t)
-
-
-def belt_tile(draw, size, pose):
-    # Rotate first around the leading bottom edge, then around the next edge
-    # after the plate is upright. Project both visible faces onto the belt.
-    phase = pose / BELT_POSES
-    length = 7.3 + size * 1.25
-    thickness = 1.9 + size * .16
-    height_scale = .92
-    depth_scale = (2.5 + size * .7) / (length + thickness)
-    linear_center = -length / 2 + (length + thickness) * phase
-    half_width = 5 + size
-    y_origin = (size * BELT_POSES + pose) * 16
-    angle = math.pi / 2 * (smoothstep(.12, .57, phase) + smoothstep(.65, .92, phase))
-    sine, cosine = math.sin(angle), math.cos(angle)
-
-    def rotate(z, height):
-        if angle < math.pi / 2:
-            return z * cosine + height * sine, -z * sine + height * cosine
-        return thickness + z * cosine + (height - thickness) * sine, -z * sine + (height - thickness) * cosine
-
-    def project(point):
-        z, height = point
-        return y_origin + round(11 + (z - linear_center) * depth_scale - height * height_scale)
-
-    corners = [rotate(-length, 0), rotate(0, 0), rotate(0, thickness), rotate(-length, thickness)]
-    left, right = 16 - half_width, 16 + half_width
-    for index, start in enumerate(corners):
-        end = corners[(index + 1) % len(corners)]
-        dz, dh = end[0] - start[0], end[1] - start[1]
-        if dh * height_scale - dz * depth_scale <= 0:
-            continue
-        top, bottom = sorted((project(start), project(end)))
-        broad_face = index % 2 == 0
-        if broad_face:
-            draw.rectangle((left, top, right, bottom), 3)
-            draw.line((left, top, right, top), 1)
-            draw.line((left, bottom, right, bottom), 2)
-            if bottom - top >= 4:
-                middle = (top + bottom) // 2
-                draw.line((left + 2, middle, right - 2, middle), 5, 2)
-                draw.point((left + 1, top + 1), 2)
-        else:
-            draw.rectangle((left, top, right, bottom), 4)
-            draw.line((left + 1, bottom, right - 1, bottom), 2)
-
 
 def sprites():
     draw, save = sprite_sheet("glyphs", 8, 8, 94)
@@ -271,11 +218,7 @@ def sprites():
     save()
 
     # Shared shading indices get a different OBJ palette for each of the six tile colors.
-    pool_start = BELT_SIZES * BELT_POSES
-    draw, save = sprite_sheet("tiles", 32, 16, pool_start + 7)
-    for size in range(BELT_SIZES):
-        for pose in range(BELT_POSES):
-            belt_tile(draw, size, pose)
+    draw, save = sprite_sheet("tiles", 32, 16, 7)
     marks = [
         ["01110", "10001", "10001", "10001", "01110"],
         ["00100", "01010", "10001", "01010", "00100"],
@@ -285,7 +228,7 @@ def sprites():
         ["10001", "01010", "00100", "01010", "10001"],
     ]
     for index, mark in enumerate(marks):
-        y = (pool_start + index) * 16 + 8
+        y = index * 16 + 8
         draw.polygon([(7, y - 3), (24, y - 3), (25, y - 2), (25, y + 2),
                       (24, y + 3), (7, y + 3), (6, y + 2), (6, y - 2)], 3)
         draw.line((8, y - 3, 23, y - 3), 1)
@@ -295,7 +238,7 @@ def sprites():
             for col, pixel in enumerate(line):
                 if pixel == "1":
                     draw.point((14 + col, y - 2 + row), 1 if row < 4 else 5)
-    y = (pool_start + 6) * 16 + 8
+    y = 6 * 16 + 8
     draw.polygon([(7, y - 2), (24, y - 2), (25, y - 1), (25, y + 1),
                   (24, y + 2), (7, y + 2), (6, y + 1), (6, y - 1)], 3)
     draw.line((8, y - 2, 23, y - 2), 1)
@@ -339,9 +282,9 @@ def sprites():
     draw.point((4, 28), 2)
     save()
 
-    draw, save = sprite_sheet("ripple", 32, 32, 6)
+    draw, save = sprite_sheet("ripple", 32, 16, 6)
     for index in range(6):
-        y = index * 32 + 16
+        y = index * 16 + 8
         width = 4 + index * 2
         height = 2 + index
         draw.ellipse((16 - width, y - height, 16 + width, y + height), outline=2 if index < 4 else 3)
