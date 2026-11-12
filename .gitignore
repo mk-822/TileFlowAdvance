@@ -1,0 +1,22 @@
+# Build outputs and local dependency checkouts
+/build/
+/.deps/
+/butano/
+/compile_commands.json
+*.elf
+*.gba
+*.map
+
+# Emulator saves and save states
+*.sav
+*.srm
+*.ss[0-9]
+*.state
+*.state[0-9]*
+
+# Local tooling
+/.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
