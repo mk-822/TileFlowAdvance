@@ -1,6 +1,4 @@
-# Audio credits
-
-## Music
+# Music credits
 
 These tracker modules were reused from [Hextris Advance](https://github.com/mk-822/Hextris-Advance/tree/d5cc738e2a1868c26f21efa7277c030e0f996e5d/src/Bgm).
 Its [music credits](https://github.com/mk-822/Hextris-Advance/blob/d5cc738e2a1868c26f21efa7277c030e0f996e5d/src/Bgm/modarchive.md)
@@ -23,9 +21,3 @@ list each selected module as Public Domain. The linked Mod Archive entries ident
 | `spc.xm` | [Spring in Puck City](https://modarchive.org/index.php?query=166535&request=view_by_moduleid) | 166535 |
 | `spectrum.xm` | [Spectrum](https://modarchive.org/index.php?query=177960&request=view_by_moduleid) | 177960 |
 | `the_dim_dungeon.xm` | [The_Dim_Dungeon](https://modarchive.org/index.php?query=172732&request=view_by_moduleid) | 172732 |
-
-## Sound effects
-
-The eight WAV files are sound effects by OSA of ザ・マッチメイカァズ (The Match-Makers), reused here from Hextris Advance. [Original provider](https://osabisi.sakura.ne.jp/m2/) · [Hextris Advance copies](https://github.com/mk-822/Hextris-Advance/tree/d5cc738e2a1868c26f21efa7277c030e0f996e5d/src/Se)
-
-The provider retains copyright and allows free use in creative works, including commercial works. The terms restrict standalone redistribution of the sound files, including edited files distributed as sound assets. [Provider's terms](https://osabisi.sakura.ne.jp/m2/material3.html)

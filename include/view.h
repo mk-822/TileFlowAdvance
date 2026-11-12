@@ -2,6 +2,7 @@
 #define TILE_FLOW_VIEW_H
 
 #include "game.h"
+#include "screen_effects.h"
 #include "bn_fixed_point.h"
 #include "bn_optional.h"
 #include "bn_regular_bg_ptr.h"
@@ -16,6 +17,7 @@ namespace tf
 {
 enum class Screen { title, play, pause, clear, over };
 enum class TitleRow { difficulty, wave, start };
+inline constexpr int result_fade_out_frames = 12;
 
 struct Display
 {
@@ -28,6 +30,7 @@ struct Display
     bool muted;
     bool fast;
     bool result_locked;
+    int result_exit_frames;
 };
 
 class View
@@ -87,8 +90,11 @@ private:
     };
 
     bn::regular_bg_ptr _background;
+    ScreenEffects _screen_effects;
+    bn::camera_ptr _panel_camera;
+    std::array<bn::fixed, bn::display::height()> _panel_scroll{};
+    bn::optional<bn::regular_bg_position_hbe_ptr> _panel_raster;
     bn::optional<bn::regular_bg_ptr> _overlay;
-    bn::optional<bn::regular_bg_ptr> _shade;
     bn::sprite_ptr _paddle;
     bn::sprite_ptr _drops;
     bn::sprite_text_generator _font;
@@ -109,9 +115,11 @@ private:
     int _next_effect = 0;
     int _intro_frame = intro_frames;
     int _intro_offset = 0;
+    int _result_age = 0;
 
     void change_screen(Screen screen);
     void update_intro(const Game& game);
+    void update_result(bn::fixed fade, bool closing);
     void update_board(const Game& game, bool tick, bool fast);
     void draw_tile(int id, bn::fixed_point point, int graphics, int palette, int depth, bool tick);
     void animate_tile(int id, Motion motion, int duration, bn::fixed_point fallback);

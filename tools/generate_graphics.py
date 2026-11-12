@@ -72,9 +72,9 @@ def frame(draw, x, y, w, h, fill=PANEL, accent=CYAN):
     draw.line((x + 5, y, x + 25, y), accent)
     draw.line((x + w - 23, y + h - 1, x + w - 6, y + h - 1), EDGE)
 
-def write_bg(name, image):
+def write_bg(name, image, bpp_mode="bpp_8", colors_count=32):
     image.save(OUT / (name + ".bmp"))
-    (OUT / (name + ".json")).write_text(json.dumps({"type": "regular_bg", "bpp_mode": "bpp_8", "colors_count": 32}))
+    (OUT / (name + ".json")).write_text(json.dumps({"type": "regular_bg", "bpp_mode": bpp_mode, "colors_count": colors_count}))
 
 def board():
     image, draw = backdrop()
@@ -146,15 +146,24 @@ def overlays():
         text(draw, (240 - len(label) * 14 + 4) // 2, 30, label, accent, 2, 2)
         draw.line((41, 51, 198, 51), GRID)
         draw.rectangle((41, 120, 198, 134), DEEP, GRID)
-        write_bg(name, image)
+        # A separate 4bpp palette keeps the card's colors independent of the board fade.
+        indices = [TRANSPARENT, DEEP, PANEL, GRID, STEEL, EDGE, accent]
+        remap = {color: index for index, color in enumerate(indices)}
+        image = image.point([remap.get(index, 0) for index in range(256)])
+        palette(image, [COLORS[index] for index in indices])
+        write_bg(name, image, "bpp_4_manual", 16)
 
     image, draw = overlay_image(512)
     frame(draw, 37, 20, 166, 38, PANEL, ICE)
     draw.line((55, 37, 184, 37), GRID)
     write_bg("wave_banner", image)
 
-    image, _ = overlay_image(fill=INK)
-    write_bg("result_shade", image)
+    # The two raster windows reveal this dither only between the ripple's edges.
+    image, draw = overlay_image()
+    for y in range(256):
+        for x in range(y % 2, 256, 2):
+            draw.point((x, y), RIM if y % 2 == 0 else 14)
+    write_bg("wave_ring", image)
 
 
 def title_screen():

@@ -8,6 +8,7 @@
 *.map
 
 # Emulator saves and save states
+/BoycottAdvance.ini
 *.sav
 *.srm
 *.ss[0-9]

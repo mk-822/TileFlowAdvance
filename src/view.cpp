@@ -8,7 +8,6 @@
 #include "bn_regular_bg_items_over_popup.h"
 #include "bn_regular_bg_items_play_board.h"
 #include "bn_regular_bg_items_result_board.h"
-#include "bn_regular_bg_items_result_shade.h"
 #include "bn_regular_bg_items_title_screen.h"
 #include "bn_regular_bg_items_wave_banner.h"
 #include "bn_sprite_items_drop_meter.h"
@@ -62,10 +61,10 @@ constexpr int screen_x = 120;
 constexpr int screen_y = 80;
 constexpr int board_priority = 3;
 constexpr int board_sprite_priority = 2;
-constexpr int shade_priority = 1;
 constexpr int overlay_priority = 0;
 constexpr int banner_travel = 204;
 constexpr int banner_slide_frames = 18;
+constexpr int result_fade_in_frames = 20;
 
 int column_x(int lane)
 {
@@ -127,6 +126,8 @@ bn::string<16> score_text(int score)
 
 View::View() :
     _background(bn::regular_bg_items::title_screen.create_bg(8, 48)),
+    _screen_effects(_background),
+    _panel_camera(bn::camera_ptr::create(0, 0)),
     _paddle(bn::sprite_items::paddle.create_sprite()),
     _drops(bn::sprite_items::drop_meter.create_sprite()),
     _font(font)
@@ -135,8 +136,10 @@ View::View() :
     _background.set_blending_bottom_enabled(true);
     _paddle.set_visible(false);
     _paddle.set_bg_priority(board_sprite_priority);
+    _paddle.set_camera(_screen_effects.camera());
     _drops.set_visible(false);
     _drops.set_bg_priority(board_sprite_priority);
+    _drops.set_camera(_screen_effects.camera());
     position(_drops, {215, 117});
     _font.set_bg_priority(board_sprite_priority);
     _font.set_z_order(-10);
@@ -152,6 +155,7 @@ View::View() :
 
 void View::start_wave(const Game& game)
 {
+    _screen_effects.reset();
     for(TileSprite& tile : _tiles)
     {
         tile = {};
@@ -199,6 +203,7 @@ void View::event(const Game& game, const Event& event)
         effect({x, 86}, game.tiles()[event.tile].color, 1, -5, false);
         break;
     case EventType::miss:
+        _screen_effects.miss();
         announce("TILE MISSED", 74);
         effect({x, 86}, 5, -3, -3, false);
         effect({x, 86}, 5, 3, -2, false);
@@ -226,6 +231,9 @@ void View::event(const Game& game, const Event& event)
             announce(bn::format<32>("FLOW +{}", event.points), 86);
         }
         int ripples = 0;
+        int matched = 0;
+        int center_x = 0;
+        int center_y = 0;
         for(int lane = 0; lane < lanes; ++lane)
         {
             const Column& column = game.pool()[lane];
@@ -236,6 +244,9 @@ void View::event(const Game& game, const Event& event)
                 const auto point = pool_point(lane, row);
                 if(event.cells & cell_bit(lane, row))
                 {
+                    center_x += point.x().integer();
+                    center_y += point.y().integer();
+                    ++matched;
                     if(!below && ripples < 3)
                     {
                         effect(point, game.tiles()[id].color, 0, 0, true);
@@ -250,8 +261,12 @@ void View::event(const Game& game, const Event& event)
                 }
             }
         }
+        _screen_effects.ripple(center_x / matched, center_y / matched, false);
         break;
     }
+    case EventType::clear:
+        _screen_effects.ripple(screen_x, screen_y + 12, true);
+        break;
     default:
         break;
     }
@@ -264,6 +279,7 @@ void View::effect(bn::fixed_point origin, int palette, int vx, int vy, bool ripp
     item.sprite.reset();
     item.sprite = (ripple ? bn::sprite_items::ripple : bn::sprite_items::spark).create_sprite();
     item.sprite->set_bg_priority(board_sprite_priority);
+    item.sprite->set_camera(_screen_effects.camera());
     item.sprite->set_z_order(-8);
     item.sprite->set_palette(_palettes[palette]);
     position(*item.sprite, origin);
@@ -306,12 +322,16 @@ void View::change_screen(Screen screen)
     {
         return;
     }
+    _panel_raster.reset();
     _overlay.reset();
     _intro_text.clear();
-    if(_shade)
+    if(is_result(_screen))
     {
-        _shade.reset();
         bn::blending::restore();
+    }
+    if(screen == Screen::title || screen == Screen::pause)
+    {
+        _screen_effects.reset();
     }
     if(screen != Screen::play)
     {
@@ -319,19 +339,17 @@ void View::change_screen(Screen screen)
     }
 
     const auto& bg = screen == Screen::title ? bn::regular_bg_items::title_screen :
-                     screen == Screen::pause ? bn::regular_bg_items::result_board : bn::regular_bg_items::play_board;
+                     screen == Screen::play ? bn::regular_bg_items::play_board : bn::regular_bg_items::result_board;
     _background.set_item(bg);
     _screen = screen;
     _paddle.set_visible(screen != Screen::title);
     if(is_result(screen))
     {
-        _shade = bn::regular_bg_items::result_shade.create_bg(8, 48);
-        _shade->set_priority(shade_priority);
-        _shade->set_blending_top_enabled(true);
-        bn::blending::set_transparency_alpha(0.60);
+        _result_age = 0;
         const auto& panel = screen == Screen::clear ? bn::regular_bg_items::clear_popup : bn::regular_bg_items::over_popup;
         _overlay = panel.create_bg(8, 48);
         _overlay->set_priority(overlay_priority);
+        _overlay->set_blending_top_enabled(true);
     }
     if(screen == Screen::title)
     {
@@ -363,6 +381,7 @@ void View::update_intro(const Game& game)
         _overlay = bn::regular_bg_items::wave_banner.create_bg(136, 48);
         _overlay->set_priority(overlay_priority);
         _font.set_bg_priority(overlay_priority);
+        _font.remove_camera();
         _font.set_center_alignment();
         _font.set_palette_item(bn::sprite_palette_item(ink[1], bn::bpp_mode::BPP_4));
         _font.generate(0, 28 + 4 - screen_y, bn::format<20>("WAVE {}", wave_text(game.wave_number())), _intro_text);
@@ -393,6 +412,47 @@ void View::update_intro(const Game& game)
     ++_intro_frame;
 }
 
+void View::update_result(bn::fixed fade, bool closing)
+{
+    constexpr int sine[] = {0, 3, 6, 7, 8, 7, 6, 3, 0, -3, -6, -7, -8, -7, -6, -3};
+    const int skew = ((1 - fade) * (closing ? 10 : 8)).integer();
+    const int shift_y = ((1 - fade) * (closing ? -8 : 7)).integer();
+    _overlay->set_y(48 + shift_y);
+    _overlay->set_visible(fade > bn::fixed(0.06));
+    bn::blending::set_transparency_alpha(fade * bn::fixed(0.8125));
+
+    if(skew)
+    {
+        for(int row = 0; row < bn::display::height(); ++row)
+        {
+            const int phase = (row / 3 + _result_age) % 16;
+            const int band = (row / 7 + _result_age / 2) % 3 - 1;
+            _panel_scroll[row] = sine[phase] * skew / 8 + band * skew / 3;
+        }
+        if(_panel_raster)
+        {
+            _panel_raster->reload_deltas_ref();
+        }
+        else
+        {
+            _panel_raster = bn::regular_bg_position_hbe_ptr::create_horizontal(
+                    *_overlay, bn::span(_panel_scroll.data(), int(_panel_scroll.size())));
+        }
+    }
+    else
+    {
+        _panel_raster.reset();
+    }
+
+    _panel_camera.set_position(0, -shift_y);
+    const int reveal_to = ((fade - bn::fixed(0.36)) * 350).integer();
+    for(auto& sprite : _text)
+    {
+        sprite.set_visible(sprite.y().integer() + screen_y <= reveal_to);
+    }
+    ++_result_age;
+}
+
 void View::draw_tile(int id, bn::fixed_point point, int graphics, int palette, int depth, bool tick)
 {
     TileSprite& tile = _tiles[id];
@@ -415,6 +475,7 @@ void View::draw_tile(int id, bn::fixed_point point, int graphics, int palette, i
         tile.sprite = bn::sprite_ptr::create(bn::sprite_items::tiles.shape_size(), _tile_graphics[graphics],
                                              _palettes[palette]);
         tile.sprite->set_bg_priority(board_sprite_priority);
+        tile.sprite->set_camera(_screen_effects.camera());
     }
     else
     {
@@ -638,6 +699,7 @@ void View::draw_hud(const Game& game, const Display& display)
         {
             _meter[index] = bn::sprite_items::goal_fill.create_sprite(144 + index * 16 - screen_x, 56 - screen_y, width - 1);
             _meter[index]->set_bg_priority(board_sprite_priority);
+            _meter[index]->set_camera(_screen_effects.camera());
         }
     }
 }
@@ -645,6 +707,23 @@ void View::draw_hud(const Game& game, const Display& display)
 void View::update(const Game& game, const Display& display)
 {
     change_screen(display.screen);
+    const bool result = is_result(display.screen);
+    const bool closing = display.result_exit_frames > 0;
+    bn::fixed fade = 0;
+    if(result)
+    {
+        if(closing)
+        {
+            const bn::fixed t = bn::fixed(display.result_exit_frames) / result_fade_out_frames;
+            fade = t * t;
+        }
+        else
+        {
+            const bn::fixed t = bn::fixed(std::min(_result_age, result_fade_in_frames)) / result_fade_in_frames;
+            fade = t * (2 - t);
+        }
+    }
+    _screen_effects.update(fade);
     if(display.screen != Screen::title)
     {
         const bool tick = display.screen != Screen::pause;
@@ -661,28 +740,32 @@ void View::update(const Game& game, const Display& display)
     const Hud next = {display.screen, display.title_row, display.difficulty, display.choice, game.wave_number(), game.score(),
                       display.best, game.progress(), game.drops_remaining(), display.volume, _status,
                       display.muted, display.fast, display.result_locked};
-    if(next == _hud)
+    if(next != _hud)
     {
-        return;
+        _hud = next;
+        _text.clear();
+        _font.set_bg_priority(board_sprite_priority);
+        _font.set_camera(_screen_effects.camera());
+        _drops.set_visible(false);
+        for(auto& segment : _meter)
+        {
+            segment.reset();
+        }
+        switch(display.screen)
+        {
+        case Screen::title: draw_title(display); break;
+        case Screen::play: draw_hud(game, display); break;
+        case Screen::pause: draw_pause(game, display); break;
+        default:
+            _font.set_bg_priority(overlay_priority);
+            _font.set_camera(_panel_camera);
+            draw_result(game, display);
+            break;
+        }
     }
-    _hud = next;
-    _text.clear();
-    _font.set_bg_priority(board_sprite_priority);
-    _drops.set_visible(false);
-    for(auto& segment : _meter)
+    if(result)
     {
-        segment.reset();
-    }
-    switch(display.screen)
-    {
-    case Screen::title: draw_title(display); break;
-    case Screen::play: draw_hud(game, display); break;
-    case Screen::pause: draw_pause(game, display); break;
-    default:
-        draw_hud(game, display);
-        _font.set_bg_priority(overlay_priority);
-        draw_result(game, display);
-        break;
+        update_result(fade, closing);
     }
 }
 }

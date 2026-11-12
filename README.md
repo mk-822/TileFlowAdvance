@@ -37,6 +37,8 @@ Butano がすでにある場合は `make LIBBUTANO=/path/to/butano/butano` で `
 
 ビルドするとプロジェクト直下に `TileFlowAdvance.gba` ができます。GBAエミュレータまたはフラッシュカートで開けます。中間ファイルとビルド結果を削除するには `make clean` を実行します。
 
+効果音はブラウザ版の合成音をもとに、ビルド時に `build/sfx/` にGBA用のモノラルWAVとして生成します。 [効果音の生成コード](tools/generate_audio.py)
+
 ### グラフィックの再生成
 
 ビルドには `graphics/` の画像を使います。描画を変更する場合は、Pillow をインストールして `python tools/generate_graphics.py` を実行してください。
@@ -45,6 +47,6 @@ Butano がすでにある場合は `make LIBBUTANO=/path/to/butano/butano` で `
 
 ゲームのソースコード、オリジナルのグラフィック、ドキュメントはMITライセンスです。 [LICENSE](LICENSE)
 
-BGM 15曲と効果音8種は Hextris-Advance から流用しています。各音源の出典とライセンスの確認状況は音源クレジットに記載しています。 [AUDIO_CREDITS.md](AUDIO_CREDITS.md)
+BGM 15曲は Hextris-Advance から流用しています。 [BGMクレジット](AUDIO_CREDITS.md)
 
 Butano、Maxmod、ツールチェーンなどのライセンスは各コンポーネントに適用されます。 [依存関係のライセンス](licenses/README.md)

@@ -501,6 +501,7 @@ void Game::resolve()
         score_lines();
         _resolution = Resolution::highlight;
         _resolution_frames = highlight_frames;
+        emit({.type = EventType::highlight, .chain = _chain});
     }
     else
     {

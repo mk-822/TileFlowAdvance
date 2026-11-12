@@ -22,7 +22,7 @@ enum class Difficulty { easy, normal, hard };
 enum class Phase { ready, playing, paused, clear, over };
 enum class Goal { flow, diagonal, tiles, horizontal, points };
 enum class EndReason { drops, full };
-enum class EventType { move, place, toss, blocked, catch_tile, miss, tumble, match, clear, over };
+enum class EventType { move, place, toss, blocked, catch_tile, miss, tumble, match, clear, over, highlight };
 
 struct Choice
 {

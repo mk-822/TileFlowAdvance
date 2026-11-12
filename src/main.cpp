@@ -5,11 +5,12 @@
 #include "bn_keypad.h"
 #include "bn_music.h"
 #include "bn_music_items.h"
+#include "bn_optional.h"
 #include "bn_random.h"
 #include "bn_sound.h"
-#include "bn_sound_items.h"
 #include "bn_sram.h"
 #include "game.h"
+#include "tile_flow_sound_items.h"
 #include "view.h"
 
 namespace
@@ -75,6 +76,11 @@ constexpr bn::music_item tracks[] = {
 };
 constexpr int track_count = int(std::size(tracks));
 
+constexpr int tile_pitch[] = {0, 2, 3, 7, 9, 12};
+constexpr int wave_keys = int(std::size(effects::start_wave));
+static_assert(std::size(tile_pitch) == colors);
+static_assert(std::size(effects::highlight) >= wave_keys * ((lanes * rows + rows) / 3));
+static_assert(std::size(effects::match) == std::size(effects::highlight));
 class Audio
 {
 public:
@@ -86,6 +92,10 @@ public:
     void set_volume(int volume, bool muted)
     {
         _volume = muted ? bn::fixed(0) : bn::fixed(volume) / volume_steps;
+        if(_volume == 0)
+        {
+            bn::sound::stop_all();
+        }
         bn::sound::set_master_volume(_volume);
         update_music_volume();
     }
@@ -109,41 +119,56 @@ public:
             _position = 0;
         }
         _last = _order[_position++];
-        _duck_frames = 0;
         tracks[_last].play(music_volume());
     }
 
     void menu_move() const
     {
-        bn::sound_items::cursor.play(0.40);
+        play(effects::move[0], -3);
     }
 
-    void event(const Event& event)
+    void start_wave(int wave) const
     {
-        using namespace bn::sound_items;
+        play(effects::start_wave[(wave - 1) % wave_keys], 1);
+    }
+
+    void event(const Game& game, const Event& event)
+    {
+        const int key = (game.wave_number() - 1) % wave_keys;
+        const auto tile_key = [&game, &event, key]
+        {
+            return key + tile_pitch[game.tiles()[event.tile].color];
+        };
+        const int chain_key = key + wave_keys * (event.chain - 1);
         switch(event.type)
         {
-        case EventType::move: cursor.play(0.24); break;
-        case EventType::place: fix.play(0.58); break;
-        case EventType::toss: spin.play(0.55); break;
-        case EventType::blocked: cursor.play(0.35, 0.70, 0); break;
-        case EventType::catch_tile: arrival.play(0.70); break;
-        case EventType::miss: fix.play(0.68, 0.58, 0); break;
-        case EventType::tumble: cursor.play_with_priority(-2, 0.13); break;
-        case EventType::match:
-            (event.chain > 1 ? erese_combo : erese).play_with_priority(2, 0.86);
+        case EventType::move: play(effects::move[key + tile_pitch[event.lane]], -3); break;
+        case EventType::place: play(effects::place[tile_key()], 0); break;
+        case EventType::toss: play(effects::throw_tile[key], 0); break;
+        case EventType::blocked: play(bn::sound_items::blocked, -1); break;
+        case EventType::catch_tile: play(effects::catch_tile[tile_key()], 0); break;
+        case EventType::miss:
+            // Several tiles can drop together. Replaying identical samples in phase clips the mix.
+            if(!_miss_sound || !_miss_sound->active())
+            {
+                _miss_sound = play(bn::sound_items::miss, 1);
+            }
             break;
+        case EventType::tumble: play(effects::tumble[tile_key()], -2); break;
+        case EventType::highlight: play(effects::highlight[chain_key], 1); break;
+        case EventType::match: play(effects::match[chain_key], 2); break;
         case EventType::clear:
-            _duck_frames = 48;
+            _duck_frames = 96;
             update_music_volume();
-            levelup.play_with_priority(3, 1);
+            play(effects::wave_clear[key], 3);
             break;
         case EventType::over:
             if(bn::music::playing())
             {
                 bn::music::stop();
             }
-            shutout.play_with_priority(3, 0.76);
+            _duck_frames = 0;
+            play(effects::game_over[key], 3);
             break;
         default:
             break;
@@ -165,6 +190,16 @@ private:
     int _position = track_count;
     int _last = -1;
     int _duck_frames = 0;
+    bn::optional<bn::sound_handle> _miss_sound;
+
+    bn::optional<bn::sound_handle> play(bn::sound_item sample, int priority) const
+    {
+        if(_volume > 0)
+        {
+            return sample.play_with_priority(priority);
+        }
+        return {};
+    }
 
     [[nodiscard]] bn::fixed music_volume() const
     {
@@ -199,7 +234,25 @@ public:
             --_result_frames;
         }
         const Screen old_screen = screen();
-        input(old_screen);
+        if(_result_exit_frames)
+        {
+            if(--_result_exit_frames == 0)
+            {
+                if(_return_to_title)
+                {
+                    _title = true;
+                    _title_row = TitleRow::difficulty;
+                }
+                else
+                {
+                    start_wave();
+                }
+            }
+        }
+        else
+        {
+            input(old_screen);
+        }
         const bool fast = screen() == Screen::play && (bn::keypad::down_held() || bn::keypad::r_held());
         if(old_screen == Screen::play && screen() == Screen::play)
         {
@@ -213,7 +266,8 @@ public:
         }
         const Screen current = screen();
         _view.update(_game, {current, _title_row, _difficulty, current == Screen::clear ? _skip_choice : _start_choice,
-                            int(best), _save.volume, bool(_save.muted), fast, _result_frames > 0});
+                            int(best), _save.volume, bool(_save.muted), fast,
+                            _result_frames > 0 || _result_exit_frames > 0, _result_exit_frames});
         _audio.update();
     }
 
@@ -229,6 +283,8 @@ private:
     int _start_choice = 0;
     int _skip_choice = 0;
     int _result_frames = 0;
+    int _result_exit_frames = 0;
+    bool _return_to_title = false;
     int _held_direction = 0;
     int _move_cooldown = 0;
     int _repeat_delay = 0;
@@ -239,10 +295,10 @@ private:
     {
         auto& app = *static_cast<App*>(context);
         app._view.event(app._game, event);
-        app._audio.event(event);
+        app._audio.event(app._game, event);
         if(event.type == EventType::clear || event.type == EventType::over)
         {
-            app._result_frames = 45;
+            app._result_frames = event.type == EventType::clear ? ScreenEffects::clear_ripple_frames : 45;
             app._skip_choice = 0;
         }
     }
@@ -276,9 +332,16 @@ private:
         {
             _audio.next_track();
         }
+        _audio.start_wave(_game.wave_number());
         _title = false;
         _view.start_wave(_game);
         clear_movement();
+    }
+
+    void exit_result(bool return_to_title)
+    {
+        _return_to_title = return_to_title;
+        _result_exit_frames = result_fade_out_frames;
     }
 
     void clear_movement()
@@ -454,7 +517,7 @@ private:
                 }
                 if(confirm)
                 {
-                    start_wave();
+                    exit_result(false);
                 }
             }
             break;
@@ -463,13 +526,12 @@ private:
             {
                 if(b_pressed())
                 {
-                    _title = true;
-                    _title_row = TitleRow::difficulty;
+                    exit_result(true);
                     _audio.menu_move();
                 }
                 else if(confirm)
                 {
-                    start_wave();
+                    exit_result(false);
                 }
             }
             break;
